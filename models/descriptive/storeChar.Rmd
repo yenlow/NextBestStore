@@ -1,0 +1,130 @@
+---
+title: "Store Characteristics"
+author: "Yen Low"
+date: "06/11/2015"
+output: 
+  html_document:
+    self_contained: no
+---
+
+### Setup
+Set paths and load dependencies
+```{r setOptions,echo=FALSE, message=FALSE}
+#set paths
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/descriptive",sep=""))
+getwd()
+
+#load dependencies
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+source(paste(RScriptPath,"/R/localMySQL.R",sep=""))
+
+require(RMySQL)
+suppressPackageStartupMessages(require(googleVis))
+require(choroplethrZip)  #provides zip.regions data for mapping zip to county
+op=options(gvis.plot.tag="chart")
+
+#get zip to state mappings
+data(zip.regions)
+zip.regions$county.fips=formatC(zip.regions$county.fips.numeric,width=5,format='f',digits=0,flag='0')
+```
+
+### Load data
+Load store charactistics (type, zip) from MySQL DB.
+```{r,echo=FALSE}
+#get store type
+con = dbConnect(drv, username=username, password=passwd,"testdb")
+storeDf=dbGetQuery(con,"SELECT * FROM stores")
+dbDisconnect(con)
+```
+
+```{r,echo=TRUE}
+head(storeDf,3)
+```
+
+### Number of stores by type
+```{r,echo=FALSE}
+numStoresByType=sort(table(storeDf$busType,useNA="ifany"))
+rev(numStoresByType)
+
+par(mar=c(2,15,2,1))
+bp=barplot(numStoresByType,horiz=T,log="x",las=1,cex.names=0.8,
+           main="Number of stores by category")
+text(1,bp,numStoresByType,cex=0.8,pos=4)
+```
+
+#### Collapse store types into fewer, more meaningful groups
+```{r}
+storeDf$bizType=NA
+storeDf$bizType[grep("drug|retail",storeDf$busType,ignore.case=T)]="retail"
+storeDf$bizType[grep("hospital|center|physician",storeDf$busType,ignore.case=T)]="medical"
+storeDf$bizType[grep("wholesale|internal|closed pharmacy|customer|home",storeDf$busType,ignore.case=T)]="others"
+newNumStoresByType=sort(table(storeDf$bizType,useNA="ifany"))
+
+par(mar=c(2,5,2,1))
+bp=barplot(newNumStoresByType,horiz=T,log="x",las=1,cex.names=1,
+           main="Number of stores by category")
+text(100,bp,newNumStoresByType,cex=1,pos=4)
+
+```
+
+Make indicator variables out of collapsed business types
+```{r}
+#tmp=model.matrix(~ bizType, data=storeDf[1:100,])
+storeTypeAsFeature=as.data.frame.matrix(xtabs(~ storeID + bizType, data=storeDf))
+head(storeTypeAsFeature,3)
+storeDf=merge(storeDf,storeTypeAsFeature,by.x="storeID",by.y=0)
+head(storeDf,3)
+```
+
+
+### Number of stores by region
+```{r,echo=FALSE}
+#count stores by state
+store_state=as.data.frame(table(storeDf$state))
+colnames(store_state)=c("state","Stores")
+
+#count stores by zip
+store_zip=as.data.frame(table(storeDf$zip))
+colnames(store_zip)=c("zip","Stores")
+
+#map zip to county
+store_county=store_zip
+#2347 stores
+tmp=merge(store_county,zip.regions[,c("region","county.name","county.fips")], by.x="zip", by.y="region")
+#don't double count same store in 2 counties (cos 1 zip can map to 2 counties)
+#delete the second county
+tmp=tmp[order(tmp$zip,tmp$county.fips),]
+tmp=tmp[!duplicated(tmp$zip),] #1427 stores
+store_county=aggregate(Stores~county.fips,tmp,sum)   #752 counties
+colnames(store_county)=c("county","Stores")
+```
+
+Preview stores by region
+```{r}
+head(store_state,3)
+head(store_county,3)
+head(store_zip,3)
+```
+
+#### State
+```{r results='asis'}
+m=gvisGeoChart(store_state,
+               locationvar="state", colorvar="Stores",
+               options=list(region="US", displayMode="regions", 
+                            resolution="provinces",
+                            width=1000, height=600,
+                            colorAxis="{colors:['#FFFFFF', '#0000FF']}"
+               )) 
+plot(m)
+```
+
+#### Output data files
+saves dataframes to  data/storeChar.RData
+also output number of stores by county to "store_county.txt"
+```{r}
+write.table(store_county,file="store_county.txt",sep="\t",row.names=F,quote=F)
+
+save(store_state,store_county,store_zip,storeDf,file="../../data/storeChar.RData")
+```

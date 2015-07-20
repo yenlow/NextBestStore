@@ -1,0 +1,73 @@
+---
+title: "Growth curve analysis with regularized mixed modeling (using latent factors)"
+author: "Yen Low"
+date: "05-Jul-15"
+output: 
+  html_document:
+    self_contained: no
+---
+  
+## Setup
+Set paths and load dependencies
+```{r,echo=FALSE}
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/glmmlasso_fa",sep=""))
+getwd()
+
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+
+require(glmmLasso)
+require(lattice)
+```
+
+## Load data
+Get monthly revenue (18-mth time series for 1487 stores)
+```{r,echo=FALSE,message=FALSE}
+load(file="../glmmlasso/datamat.RData",verbose=T)
+totRev=datamat[,c("totalRevenue","timeOrder","storeID")]
+rm(trnMat,tstMat,datamat,columnMean,columnSD)
+```
+
+Load store data (1109 stores, 15 latent variables)
+```{r}
+load(file="../fa/FA.RData",verbose=T)
+dim(factorScores)
+head(factorScores,3)
+```
+
+## Make feature matrix
+Set time order for nlme
+```{r,echo=FALSE}
+factorScores=as.data.frame(factorScores)
+factorScores$storeID=as.factor(rownames(factorScores))
+datamat=merge(factorScores,totRev,by="storeID",sort=T)
+datamat=datamat[order(datamat$storeID,datamat$timeOrder),]
+dim(datamat)  #19792    18
+summary(datamat$totalRevenue)
+```
+
+## Partition data into training and test sets
+Get test store IDs (extract 133 storeIDs from 10% test set used to validate random forest model).  
+Remove 134 stores with short time series (13 < mths)  
+999 stores, 17840 rows for training  
+125 stores, 2074 rows for testing (10%)  
+```{r, echo=T}
+#Get test store IDs (extract from test set used to validate random forest model)
+trnMat=datamat[!(datamat$storeID %in% tstStore),] #17808 x 19
+tstMat=datamat[datamat$storeID %in% tstStore,]  #1981 x 19
+
+length(unique(trnMat$storeID))  #998 stores, 17824 rows for training
+length(unique(tstMat$storeID))  #111 stores, 1968 rows for testing (10%)
+
+summary(trnMat$totalRevenue)
+summary(tstMat$totalRevenue)
+
+save(trnMat,tstMat,tstStore,datamat,file="datamat.RData")
+```
+
+No need to rescale factor scores  
+No missing values in factor scores
+
+
+

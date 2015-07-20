@@ -1,0 +1,102 @@
+---
+title: "Competition Indices"
+author: "Yen Low"
+date: "06/11/2015"
+output: 
+  html_document:
+  self_contained: no
+---
+
+### Setup
+Set paths and load dependencies
+```{r setOptions,echo=FALSE, message=FALSE}
+#set paths
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/descriptive",sep=""))
+getwd()
+
+#load dependencies
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+source(paste(RScriptPath,"/R/localMySQL.R",sep=""))
+
+require(RMySQL)
+suppressPackageStartupMessages(require(googleVis))
+op=options(gvis.plot.tag=NULL)
+#plotGoogleMaps package
+require(reshape2)
+
+#get zip to long, lat
+require(zipcode)
+data(zipcode)
+
+#get zip to state mappings
+#require(choroplethrZip)  #provides zip.regions data for mapping zip to county
+#data(zip.regions)
+#zip.regions$county.fips=formatC(zip.regions$county.fips.numeric,width=5,format='f',digits=0,flag='0')
+```
+
+### Load data
+Load competitor stores and zip from MySQL DB.
+```{r echo=FALSE}
+con = dbConnect(drv, username=username, password=passwd,"testdb")
+otherStore=dbGetQuery(con,"SELECT * FROM otherStores")
+dbDisconnect(con)
+numOtherByZip=table(otherStore$zip)
+hist(numOtherByZip)
+```
+
+Load our stores and zip
+```{r}
+load(file="../../data/storeChar.RData",verbose=T)
+```
+
+#Form all store dataframe
+```{r,echo=FALSE}
+otherStore$client=0
+storeDf$client=1
+colnames(otherStore)=c("storeID","zip","client")
+allStores=rbind(storeDf[,colnames(otherStore)],otherStore)
+head(allStores,3)
+```
+
+#Form competition indices dataframe
+```{r echo=FALSE}
+tmp=xtabs(~ zip + client, allStores)
+competDf=data.frame(numCompetitor=tmp[,1],numClient=tmp[,2])
+rownames(competDf)=rownames(tmp)
+competDf$numCompetitor=as.double(competDf$numCompetitor)
+competDf$numClient=as.double(competDf$numClient)
+competDf$competDensity=competDf$numCompetitor/(competDf$numClient+competDf$numCompetitor)
+head(competDf,3)
+hist(competDf$competDensity[competDf$competDensity<1])
+```
+
+#Save dataframes
+```{r}
+save(competDf,allStores,file=paste0(ProjectPath,"/insight/data/competition.RData"))
+```
+
+#Plot competitors vs our stores
+Only showing 150 most competitive zip codes (out of 50,000 zip codes)
+```{r results='asis'}
+#selectedStores=allStores[sample(nrow(allStores),100),]
+#tmp=merge(selectedStores,zipcode[,c("zip","latitude","longitude")],by="zip")
+#tmp$loc=paste(tmp$latitude,tmp$longitude,sep=":")
+#m=gvisMap(tmp,locationvar="loc",options=list(mapType="terrain",region="US"))
+
+nZip=10
+#most competitive means zero of our own stores
+#TODO: exclude competDensity=1
+tmp=merge(competDf[order(competDf$competDensity,decreasing=T)[1:nZip],],zipcode[,c("zip","latitude","longitude")],by.x=0  ,by.y="zip")
+tmp$loc=paste(round(tmp$latitude,1),round(tmp$longitude,1),sep=":")
+tmp2=melt(tmp[,c("numCompetitor","numClient","loc")],"loc")
+tmp2$variable=as.numeric(tmp2$variable)
+
+m=gvisGeoChart(tmp2,locationvar="loc",colorvar="variable",sizevar="value",
+               options=list(region="US", displayMode="markers", 
+                            resolution="provinces",
+                            width=1000, height=600,
+                            colorAxis="{colors:['#FF3300', '#0000FF']}")) 
+plot(m)
+```

@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+<meta name="author" content="Yen Low" />
+
+<meta name="date" content="2015-06-11" />
+
+<title>Store Characteristics</title>
+
+<script src="storeChar_files/jquery-1.11.0/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="storeChar_files/bootstrap-3.3.1/css/bootstrap.min.css" rel="stylesheet" />
+<script src="storeChar_files/bootstrap-3.3.1/js/bootstrap.min.js"></script>
+<script src="storeChar_files/bootstrap-3.3.1/shim/html5shiv.min.js"></script>
+<script src="storeChar_files/bootstrap-3.3.1/shim/respond.min.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<link rel="stylesheet"
+      href="storeChar_files/highlight/default.css"
+      type="text/css" />
+<script src="storeChar_files/highlight/highlight.js"></script>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs && document.readyState && document.readyState === "complete") {
+   window.setTimeout(function() {
+      hljs.initHighlighting();
+   }, 0);
+}
+</script>
+
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img { 
+  max-width:100%; 
+  height: auto; 
+}
+</style>
+<div class="container-fluid main-container">
+
+
+<div id="header">
+<h1 class="title">Store Characteristics</h1>
+<h4 class="author"><em>Yen Low</em></h4>
+<h4 class="date"><em>06/11/2015</em></h4>
+</div>
+
+
+<div id="setup" class="section level3">
+<h3>Setup</h3>
+<p>Set paths and load dependencies</p>
+<pre><code>## [1] &quot;/mnt/hgfs/projects/insight/models/descriptive&quot;</code></pre>
+</div>
+<div id="load-data" class="section level3">
+<h3>Load data</h3>
+<p>Load store charactistics (type, zip) from MySQL DB.</p>
+<pre><code>## [1] TRUE</code></pre>
+<pre class="r"><code>head(storeDf,3)</code></pre>
+<pre><code>##   storeID   DEA_NUM   zip state                   busType
+## 1  009001 AU7575852 99603    AK RETAIL DRUG STORE        
+## 2  349803 AA2284571 99737    AK HOSPITAL GROUP           
+## 3  944612 FH3645869 35058    AL DRUG CHAIN</code></pre>
+</div>
+<div id="number-of-stores-by-type" class="section level3">
+<h3>Number of stores by type</h3>
+<pre><code>## 
+## RETAIL DRUG STORE         DRUG CHAIN                
+##                      1082                       291 
+## GROCERY/DRUG COMBINATION  HOSPITAL GROUP            
+##                       113                        59 
+## WHOLESALER NON-MCKESSON   HOSPITAL (INDIVIDUAL)     
+##                        15                         8 
+## ONCOLOGY CENTERS          INTERNAL - EXTERNAL       
+##                         6                         6 
+## CLOSED PHARMACY           RETAIL STORE - NON-DRUG   
+##                         5                         4 
+## HOSPITAL CHAIN            PHYSICIAN/DENTIST         
+##                         3                         2 
+## NON-ORDER CUSTOMER        SURGICENTERS              
+##                         2                         1 
+## LARGE DRUG CHAIN          INTERNAL SALES            
+##                         1                         1 
+## HOME IV THERAPY           FED HOSPITAL NON-MILITAR  
+##                         1                         1 
+## DME RETAILER              
+##                         1</code></pre>
+<p><img src="storeChar_files/figure-html/unnamed-chunk-3-1.png" title="" alt="" width="672" /></p>
+<div id="collapse-store-types-into-fewer-more-meaningful-groups" class="section level4">
+<h4>Collapse store types into fewer, more meaningful groups</h4>
+<pre class="r"><code>storeDf$bizType=NA
+storeDf$bizType[grep(&quot;drug|retail&quot;,storeDf$busType,ignore.case=T)]=&quot;retail&quot;
+storeDf$bizType[grep(&quot;hospital|center|physician&quot;,storeDf$busType,ignore.case=T)]=&quot;medical&quot;
+storeDf$bizType[grep(&quot;wholesale|internal|closed pharmacy|customer|home&quot;,storeDf$busType,ignore.case=T)]=&quot;others&quot;
+newNumStoresByType=sort(table(storeDf$bizType,useNA=&quot;ifany&quot;))
+
+par(mar=c(2,5,2,1))
+bp=barplot(newNumStoresByType,horiz=T,log=&quot;x&quot;,las=1,cex.names=1,
+           main=&quot;Number of stores by category&quot;)
+text(100,bp,newNumStoresByType,cex=1,pos=4)</code></pre>
+<p><img src="storeChar_files/figure-html/unnamed-chunk-4-1.png" title="" alt="" width="672" /></p>
+<p>Make indicator variables out of collapsed business types</p>
+<pre class="r"><code>#tmp=model.matrix(~ bizType, data=storeDf[1:100,])
+storeTypeAsFeature=as.data.frame.matrix(xtabs(~ storeID + bizType, data=storeDf))
+head(storeTypeAsFeature,3)</code></pre>
+<pre><code>##        medical others retail
+## 000026       0      0      1
+## 000417       0      0      1
+## 001172       0      0      1</code></pre>
+<pre class="r"><code>storeDf=merge(storeDf,storeTypeAsFeature,by.x=&quot;storeID&quot;,by.y=0)
+head(storeDf,3)</code></pre>
+<pre><code>##   storeID   DEA_NUM   zip state                   busType bizType medical
+## 1  000026 AS6655104 81435    CO RETAIL DRUG STORE          retail       0
+## 2  000417 BC6202193 56201    MN GROCERY/DRUG COMBINATION   retail       0
+## 3  001172 BV0696154 81054    CO RETAIL DRUG STORE          retail       0
+##   others retail
+## 1      0      1
+## 2      0      1
+## 3      0      1</code></pre>
+</div>
+</div>
+<div id="number-of-stores-by-region" class="section level3">
+<h3>Number of stores by region</h3>
+<p>Preview stores by region</p>
+<pre class="r"><code>head(store_state,3)</code></pre>
+<pre><code>##   state Stores
+## 1    AK      2
+## 2    AL      7
+## 3    AR     67</code></pre>
+<pre class="r"><code>head(store_county,3)</code></pre>
+<pre><code>##   county Stores
+## 1  01033      1
+## 2  01043      1
+## 3  01073      1</code></pre>
+<pre class="r"><code>head(store_zip,3)</code></pre>
+<pre><code>##     zip Stores
+## 1 01002      1
+## 2 01005      1
+## 3 01028      1</code></pre>
+<div id="state" class="section level4">
+<h4>State</h4>
+<pre class="r"><code>m=gvisGeoChart(store_state,
+               locationvar=&quot;state&quot;, colorvar=&quot;Stores&quot;,
+               options=list(region=&quot;US&quot;, displayMode=&quot;regions&quot;, 
+                            resolution=&quot;provinces&quot;,
+                            width=1000, height=600,
+                            colorAxis=&quot;{colors:[&#39;#FFFFFF&#39;, &#39;#0000FF&#39;]}&quot;
+               )) 
+plot(m)</code></pre>
+<!-- GeoChart generated in R 3.2.0 by googleVis 0.5.8 package -->
+<!-- Tue Jun 16 12:58:15 2015 -->
+<!-- jsHeader -->
+<script type="text/javascript">
+ 
+// jsData 
+function gvisDataGeoChartIDf8860fec1a7 () {
+var data = new google.visualization.DataTable();
+var datajson =
+[
+ [
+ "AK",
+2 
+],
+[
+ "AL",
+7 
+],
+[
+ "AR",
+67 
+],
+[
+ "AZ",
+10 
+],
+[
+ "CA",
+90 
+],
+[
+ "CO",
+39 
+],
+[
+ "CT",
+37 
+],
+[
+ "DE",
+1 
+],
+[
+ "FL",
+77 
+],
+[
+ "GA",
+25 
+],
+[
+ "HI",
+33 
+],
+[
+ "IA",
+17 
+],
+[
+ "ID",
+26 
+],
+[
+ "IL",
+44 
+],
+[
+ "IN",
+31 
+],
+[
+ "KS",
+36 
+],
+[
+ "KY",
+28 
+],
+[
+ "LA",
+20 
+],
+[
+ "MA",
+54 
+],
+[
+ "MD",
+4 
+],
+[
+ "ME",
+2 
+],
+[
+ "MI",
+77 
+],
+[
+ "MN",
+57 
+],
+[
+ "MO",
+60 
+],
+[
+ "MS",
+31 
+],
+[
+ "MT",
+22 
+],
+[
+ "NC",
+7 
+],
+[
+ "ND",
+17 
+],
+[
+ "NE",
+59 
+],
+[
+ "NH",
+2 
+],
+[
+ "NJ",
+13 
+],
+[
+ "NM",
+18 
+],
+[
+ "NV",
+7 
+],
+[
+ "NY",
+67 
+],
+[
+ "OH",
+74 
+],
+[
+ "OK",
+35 
+],
+[
+ "OR",
+27 
+],
+[
+ "PA",
+61 
+],
+[
+ "RI",
+4 
+],
+[
+ "SC",
+2 
+],
+[
+ "SD",
+11 
+],
+[
+ "TN",
+14 
+],
+[
+ "TX",
+109 
+],
+[
+ "UT",
+32 
+],
+[
+ "VA",
+9 
+],
+[
+ "VT",
+5 
+],
+[
+ "WA",
+50 
+],
+[
+ "WI",
+70 
+],
+[
+ "WV",
+8 
+],
+[
+ "WY",
+4 
+] 
+];
+data.addColumn('string','state');
+data.addColumn('number','Stores');
+data.addRows(datajson);
+return(data);
+}
+ 
+// jsDrawChart
+function drawChartGeoChartIDf8860fec1a7() {
+var data = gvisDataGeoChartIDf8860fec1a7();
+var options = {};
+options["width"] =   1000;
+options["height"] =    600;
+options["region"] = "US";
+options["displayMode"] = "regions";
+options["resolution"] = "provinces";
+options["colorAxis"] = {colors:['#FFFFFF', '#0000FF']};
+
+    var chart = new google.visualization.GeoChart(
+    document.getElementById('GeoChartIDf8860fec1a7')
+    );
+    chart.draw(data,options);
+    
+
+}
+  
+ 
+// jsDisplayChart
+(function() {
+var pkgs = window.__gvisPackages = window.__gvisPackages || [];
+var callbacks = window.__gvisCallbacks = window.__gvisCallbacks || [];
+var chartid = "geochart";
+  
+// Manually see if chartid is in pkgs (not all browsers support Array.indexOf)
+var i, newPackage = true;
+for (i = 0; newPackage && i < pkgs.length; i++) {
+if (pkgs[i] === chartid)
+newPackage = false;
+}
+if (newPackage)
+  pkgs.push(chartid);
+  
+// Add the drawChart function to the global list of callbacks
+callbacks.push(drawChartGeoChartIDf8860fec1a7);
+})();
+function displayChartGeoChartIDf8860fec1a7() {
+  var pkgs = window.__gvisPackages = window.__gvisPackages || [];
+  var callbacks = window.__gvisCallbacks = window.__gvisCallbacks || [];
+  window.clearTimeout(window.__gvisLoad);
+  // The timeout is set to 100 because otherwise the container div we are
+  // targeting might not be part of the document yet
+  window.__gvisLoad = setTimeout(function() {
+  var pkgCount = pkgs.length;
+  google.load("visualization", "1", { packages:pkgs, callback: function() {
+  if (pkgCount != pkgs.length) {
+  // Race condition where another setTimeout call snuck in after us; if
+  // that call added a package, we must not shift its callback
+  return;
+}
+while (callbacks.length > 0)
+callbacks.shift()();
+} });
+}, 100);
+}
+ 
+// jsFooter
+</script>
+<!-- jsChart -->
+<script type="text/javascript" src="https://www.google.com/jsapi?callback=displayChartGeoChartIDf8860fec1a7"></script>
+<!-- divChart -->
+<div id="GeoChartIDf8860fec1a7" style="width: 1000; height: 600;">
+
+</div>
+</div>
+<div id="output-data-files" class="section level4">
+<h4>Output data files</h4>
+<p>saves dataframes to data/storeChar.RData also output number of stores by county to “store_county.txt”</p>
+<pre class="r"><code>write.table(store_county,file=&quot;store_county.txt&quot;,sep=&quot;\t&quot;,row.names=F,quote=F)
+
+save(store_state,store_county,store_zip,storeDf,file=&quot;../../data/storeChar.RData&quot;)</code></pre>
+</div>
+</div>
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+$(document).ready(function () {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+});
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

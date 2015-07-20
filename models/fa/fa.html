@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+<meta name="author" content="Yen Low" />
+
+
+<title>Factor analysis to reduce dimensions</title>
+
+<script src="fa_files/jquery-1.11.0/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="fa_files/bootstrap-3.3.1/css/bootstrap.min.css" rel="stylesheet" />
+<script src="fa_files/bootstrap-3.3.1/js/bootstrap.min.js"></script>
+<script src="fa_files/bootstrap-3.3.1/shim/html5shiv.min.js"></script>
+<script src="fa_files/bootstrap-3.3.1/shim/respond.min.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<link rel="stylesheet"
+      href="fa_files/highlight/default.css"
+      type="text/css" />
+<script src="fa_files/highlight/highlight.js"></script>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs && document.readyState && document.readyState === "complete") {
+   window.setTimeout(function() {
+      hljs.initHighlighting();
+   }, 0);
+}
+</script>
+
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img { 
+  max-width:100%; 
+  height: auto; 
+}
+</style>
+<div class="container-fluid main-container">
+
+
+<div id="header">
+<h1 class="title">Factor analysis to reduce dimensions</h1>
+<h4 class="author"><em>Yen Low</em></h4>
+<h4 class="date"><em>06-Jul-15</em></h4>
+</div>
+
+
+<div id="setup" class="section level2">
+<h2>Setup</h2>
+<p>Set paths and load dependencies</p>
+<pre><code>## [1] &quot;/mnt/hgfs/projects/insight/models/fa&quot;</code></pre>
+<pre><code>## Loading required package: psych</code></pre>
+</div>
+<div id="load-feature-matrix." class="section level2">
+<h2>Load feature matrix.</h2>
+<pre><code>## Loading objects:
+##   dsMat
+##   dsMat_rmColRow</code></pre>
+<pre><code>## [1] 1109   69</code></pre>
+</div>
+<div id="factor-analysis" class="section level2">
+<h2>Factor analysis</h2>
+<p>Determine number of factors * 3 factors explain 25% variance * 5 factors explain 36% variance * 8 factors explain 52% variance * 15 factors explain 74% variance</p>
+<pre class="r"><code>tmp=fa.parallel(dsMat_rmColRow,fm=&quot;oblimin&quot;,fa=&quot;both&quot;)</code></pre>
+<pre><code>## factor method not specified correctly, minimum residual (unweighted least squares  used</code></pre>
+<pre><code>## Warning in cor.smooth(R): Matrix was not positive definite, smoothing was
+## done</code></pre>
+<pre><code>## Warning in cor.smooth(R): Matrix was not positive definite, smoothing was
+## done</code></pre>
+<pre><code>## Warning in cor.smooth(r): Matrix was not positive definite, smoothing was
+## done</code></pre>
+<pre><code>## The estimated weights for the factor scores are probably incorrect.  Try a different factor extraction method.</code></pre>
+<p><img src="fa_files/figure-html/unnamed-chunk-3-1.png" title="" alt="" width="672" /></p>
+<pre><code>## Parallel analysis suggests that the number of factors =  13  and the number of components =  12</code></pre>
+<pre class="r"><code>plot(cumsum(tmp$pc.values),col=&quot;red&quot;,type=&quot;l&quot;,
+     xlab=&quot;Number of latent factors&quot;,ylab=&quot;Eigenvalue&quot;,main=&quot;Scree Plot&quot;,ylim=c(0,100))
+points(tmp$pc.values,type=&quot;l&quot;)
+legend(&quot;topleft&quot;,pch=c(16,16),col=c(&quot;black&quot;,&quot;red&quot;),c(&quot;Eigenvalue&quot;, &quot;Cumulative eigenvalue&quot;))</code></pre>
+<p><img src="fa_files/figure-html/unnamed-chunk-3-2.png" title="" alt="" width="672" /></p>
+<div id="latent-factors" class="section level4">
+<h4>Latent factors</h4>
+<p>View main loadings to determine factor names * PC1: financial access (uninsured, Could.not.see.doctor.due.to.cost, non-eng speaking) * PC2: STI, infant mortality, low birthweight, single parent, Food.insecurity, Food.env * PC3: premature death, injury, OD, motor accidents, smoking, poor health (mental, physical) * PC4: health costs, pvt hosp stays, Physical.inactivity, diabetes * PC5: driving alone to work, HIV, incomeInequality, LongCommute * PC6: pr care providers (pr care, mental, dental), LongCommute * PC7: unemployment, poor health days * PC8: rural, diabetic screening, socialAssoc, exercise facilities * PC9: tertiary care providers (genMed, surg, Health_Care_and_Social_Assistance) * PC10: manufacturing, nBiz, Financial services * PC11: medical rx store type * PC12: water pollution, healthyFood * PC13: fin/prof services * PC14: alcholism, DUI * PC15: other biz (transport/warehousing, remediation)</p>
+<pre class="r"><code>load(file=&quot;FA.RData&quot;,verbose=T)</code></pre>
+<pre><code>## Loading objects:
+##   mod_fa
+##   factorScores</code></pre>
+<pre class="r"><code>#mod_fa=fa(dsMat_rmColRow, nfactors=15, rotate=&quot;oblimin&quot;, missing=T)
+#mod_fa # print results
+#attributes(mod_fa)
+
+#view the loadings (get the top features contributing to the factors)
+#sink(&quot;FAloadingsTables.txt&quot;)
+#for(i in 1:15){
+#  print(head(mod_fa$loadings[order(abs(mod_fa$loadings[,i]),decreasing=T),c(i,1)],10))
+#}
+#sink()
+#print(mod_fa, digits=2, cutoff=.3, sort=TRUE)</code></pre>
+</div>
+<div id="save-the-loadings-and-fa-model" class="section level4">
+<h4>Save the loadings and FA model</h4>
+<pre class="r"><code>#write.table(mod_fa$loadings,file=&quot;FAloadings.txt&quot;, col.names=NA, quote=F,sep=&quot;\t&quot;)
+#save(mod_fa,file=&quot;FA.RData&quot;)</code></pre>
+</div>
+<div id="make-feature-matrix-of-latent-factors" class="section level3">
+<h3>Make feature matrix of latent factors</h3>
+<pre class="r"><code>#attributes(mod_fa)
+#factorScores=mod_fa$scores
+dim(factorScores)    #1109   15</code></pre>
+<pre><code>## [1] 1109   15</code></pre>
+<pre class="r"><code>#colnames(factorScores)=c(&quot;Uninsured&quot;,&quot;Natal&quot;,&quot;PrematureDeath&quot;,&quot;HealthCost&quot;,&quot;Commute&quot;,&quot;PrCare&quot;,&quot;Unemployment&quot;,&quot;Rural&quot;#,&quot;TertCare&quot;,&quot;BizAct&quot;,&quot;MedicalRxStore&quot;,&quot;Pollution&quot;,&quot;ProfServices&quot;,&quot;Alcholism&quot;,&quot;OtherBiz&quot;)
+
+#save(mod_fa,factorScores,file=&quot;FA.RData&quot;)</code></pre>
+</div>
+<div id="fa-plots-choose-any-2-latent-factors" class="section level3">
+<h3>FA plots (choose any 2 latent factors)</h3>
+<pre class="r"><code>#png(file=&quot;FAloadings.png&quot;,width=7,height=7,units=&quot;in&quot;,res=300,bg=&quot;white&quot;)
+top1=mod_fa$loadings[order(abs(mod_fa$loadings[,1]),decreasing=T)[1:5],c(1,7)]
+top2=mod_fa$loadings[order(abs(mod_fa$loadings[,7]),decreasing=T)[1:5],c(1,7)]
+#png(file=&quot;factorPlot.png&quot;,width=5,height=5,units=&quot;in&quot;,res=300,bg=&quot;transparent&quot;)
+plot(mod_fa$loadings[,c(1,7)],type=&quot;n&quot;, axes=F,asp=1,xlim=c(-.25,1), ylim=c(-0.5,1),
+     xlab=&quot;Uninsured factor score&quot;,ylab=&quot;Unemployment factor score&quot;)
+axis(1,seq(-1,1,len=5),pos=0,cex.axis=0.8)
+axis(2,seq(-1,1,len=5),pos=0,las=2,cex.axis=0.8)
+text(top1,labels=rownames(top1),cex=.5,col=&quot;red&quot;)
+text(jitter(top2),labels=rownames(top2),cex=.5,col=&quot;blue&quot;)
+segments(rep(0,5),rep(0,5),top1[,1],top1[,2],&quot;red&quot;)
+segments(rep(0,5),rep(0,5),top2[,1],top2[,2],&quot;blue&quot;)</code></pre>
+<p><img src="fa_files/figure-html/unnamed-chunk-7-1.png" title="" alt="" width="7000" height="7000" /></p>
+<pre class="r"><code>#dev.off()
+
+dimnames(mod_fa$loadings)[[2]]=colnames(factorScores)
+#png(file=&quot;FAgraph.png&quot;,width=11,height=11,units=&quot;in&quot;,res=300,bg=&quot;transparent&quot;)
+fa.diagram(mod_fa,cut=0.45,e.size=0.02)</code></pre>
+<p><img src="fa_files/figure-html/unnamed-chunk-7-2.png" title="" alt="" width="7000" height="7000" /></p>
+<pre class="r"><code>#dev.off()</code></pre>
+</div>
+</div>
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+$(document).ready(function () {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+});
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,161 @@
+---
+title: "Growth curve analysis with mixed modeling (use latent factors, sqrt transform revenue to make more 'Normal')"
+author: "Yen Low"
+date: "07-Jul-15"
+output: 
+  html_document:
+    self_contained: no
+---
+  
+### Setup
+Set paths and load dependencies
+```{r,echo=FALSE}
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/hlm_fa_sqrt",sep=""))
+getwd()
+ 
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+source(paste(RScriptPath,"/R/forestplot.R",sep=""))
+
+require(nlme)
+require(lattice)
+require(latticeExtra)
+```
+
+### Load data
+Use data matrix generated from FA and processed in ../glmmlasso_fa/datamat.Rmd
+```{r,echo=FALSE}
+load(file="../glmmlasso_fa/datamat.RData",verbose=T)
+qqnorm(trnMat$totalRevenue)
+qqnorm(sqrt(trnMat$totalRevenue+10000))
+trnMat$totalRevenue_sqrt=sqrt(trnMat$totalRevenue+10000)
+tstMat$totalRevenue_sqrt=sqrt(tstMat$totalRevenue+10000)
+```
+---
+
+
+### Linear mixed modeling
+*Level 1:* monthly revenue  
+*Level 2:* store level  
+*Significant factors:* timeOrder, MedicalRxStore, Uninsured, Commute, OtherBiz, Pollution, ProfServices, TertCare
+#### Intercept as outcome model
+```{r}
+#Formulate model
+varString=paste(colnames(trnMat)[2:16],collapse=" + ")
+formulaString=paste0("totalRevenue_sqrt ~ timeOrder + ",varString)
+formulaString
+mod_intAsOutcome=lme(as.formula(formulaString),
+                    random=~timeOrder|storeID,data=trnMat,
+                    na.action=na.omit,control=list(opt="optim"))
+summary(mod_intAsOutcome)
+```
+
+
+#### Slope as outcome model
+*Significant factors:* timeOrder, MedicalRxStore, Uninsured, Commute, OtherBiz, Pollution, ProfServices, HealthCost, TertCare, timeOrder:HealthCost, timeOrder:ProfServices, timeOrder:Alcholism
+```{r}
+varString2=paste0("timeOrder*",colnames(trnMat)[2:16],collapse=" + ")
+formulaString2=paste0("totalRevenue_sqrt ~ ",varString2)
+formulaString2
+
+mod_slopeAsOutcome=lme(as.formula(formulaString2),
+                        random=~timeOrder|storeID,data=trnMat,
+                        na.action=na.omit,control=list(opt="optim"))
+summary(mod_slopeAsOutcome)
+```
+
+
+#### Best slope as outcome model
+*Significant factors:* timeOrder, MedicalRxStore, Uninsured, Commute, Pollution, OtherBiz, ProfServices, HealthCost, TertCare, timeOrder:HealthCost, timeOrder:ProfServices, timeOrder:Alcholism
+```{r}
+formulaString3=paste0(formulaString," + timeOrder*HealthCost + timeOrder*ProfServices + timeOrder*Alcholism")
+mod_bestslopeAsOutcome=lme(as.formula(formulaString3),
+                        random=~timeOrder|storeID,data=trnMat,
+                        na.action=na.omit,control=list(opt="optim"))
+summary(mod_bestslopeAsOutcome)
+```
+
+
+#### Update with polynomial time
+*Significant factors:* timeOrder, timeOrder^2, timeOrder^3, MedicalRxStore, Uninsured, Commute, Pollution, ProfServices, Other Biz, HealthCost, TertCare, timeOrder:HealthCost, timeOrder:ProfServices, timeOrder:Alcholism
+```{r}
+formulaString4=paste0("totalRevenue_sqrt ~ timeOrder + I(timeOrder^2) + I(timeOrder^3) + ",varString," + timeOrder*HealthCost + timeOrder*ProfServices + timeOrder*Alcholism")
+formulaString4
+mod_polytime=lme(as.formula(formulaString4),
+                        random=~timeOrder|storeID,data=trnMat,
+                        na.action=na.omit,control=list(opt="optim"))
+summary(mod_polytime)
+```
+
+
+#### Update with ARIMA
+*Significant factors:* timeOrder, timeOrder^2, timeOrder^3, MedicalRxStore, Uninsured, Commute, Pollution, ProfServices, Other Biz, HealthCost, TertCare, timeOrder:HealthCost, timeOrder:ProfServices
+```{r}
+mod_cortime=lme(as.formula(formulaString4),
+                        random=~timeOrder|storeID,data=trnMat,
+                        correlation=corExp(),
+                        na.action=na.omit,control=list(opt="optim"),keep.data=F)
+summary(mod_cortime)
+attributes(summary(mod_cortime))
+
+d=as.data.frame(summary(mod_cortime)$tTable[,1:2])
+colnames(d)[1]="median"
+d$lowlim=d$median-1.96*d$Std.Error
+d$upplim=d$median+1.96*d$Std.Error
+
+write.table(d,file="beta_HLM.txt",sep="\t",quote=F,col.names=NA)
+save(mod_cortime,d,file="hlm_fa_sqrt.RData")
+#load(file="hlm_fa.RData",verbose=T)
+
+forestplot(d[nrow(d):2,],orderoflevels=NULL,xlab="Beta coefficients",ylab="",xmin=-6, xmax=6, xgap=2, sortByLabels=FALSE)
+```
+
+
+
+### Compare models with LRT
+Best slope as outcome model is the best model
+```{r}
+anova(mod_slopeAsOutcome,mod_intAsOutcome)
+anova(mod_bestslopeAsOutcome,mod_slopeAsOutcome)
+anova(mod_bestslopeAsOutcome,mod_intAsOutcome)
+anova(mod_polytime,mod_bestslopeAsOutcome)
+anova(mod_cortime, mod_polytime)
+```
+
+
+### Validate best HLM model
+#### On training data
+```{r trnTS, echo=FALSE}
+trnMatpred=trnMat
+trnMat$storeID=as.character(trnMat$storeID)
+trnMatpred$predictedRev=predict(mod_cortime, newdata=trnMat, level=0)
+selStore=sample(unique(trnMat$storeID),20)
+actualRev=xyplot(totalRevenue_sqrt~timeOrder|storeID,data=trnMat[trnMat$storeID %in% selStore,],col="red",type="p")
+predRev=xyplot(predictedRev~timeOrder|storeID,data=trnMatpred[trnMatpred$storeID %in% selStore,],col="black",type="l")
+actualRev + as.layer(predRev)
+```
+
+#### On test data
+```{r tstTS, echo=FALSE}
+tstMat$storeID=as.character(tstMat$storeID)
+tstMatpred=tstMat
+tstMatpred$predictedRev=predict(mod_cortime, newdata=tstMat, level=0)
+
+selStore=sample(unique(tstMat$storeID),20)
+actualRev=xyplot(totalRevenue_sqrt~timeOrder|storeID,data=tstMat[tstMat$storeID %in% selStore,],col="red",type="p")
+predRev=xyplot(predictedRev~timeOrder|storeID,data=tstMatpred[tstMat$storeID %in% selStore,],col="black",type="l")
+actualRev + as.layer(predRev)
+
+resid=tstMatpred$predictedRev-tstMatpred$totalRevenue_sqrt
+mse=mean(resid^2,na.rm=T)
+mse
+1-mse/var(tstMatpred$totalRevenue_sqrt)
+cor(tstMatpred$predictedRev,tstMatpred$totalRevenue_sqrt)^2
+
+save(mod_cortime,d,tstMatpred,file="hlm_fa_sqrt.RData")
+```
+
+
+## TODO
+1. consider 3rd level (county)

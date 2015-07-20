@@ -1,0 +1,117 @@
+---
+title: "Predict revenue at any timepoint using Random Forest regression (assumes revenue is independent within store's time serie)"
+author: "Yen Low"
+date: "06/12/2015"
+output: 
+  html_document:
+    self_contained: no
+---
+  
+### Setup
+Set paths and load dependencies
+```{r,echo=FALSE}
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/rf_timeseries",sep=""))
+getwd()
+
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+source(paste(RScriptPath,"/R/hampel.R",sep=""))
+#source(paste(RScriptPath,"/R/growth.R",sep=""))
+
+require(randomForest)
+```
+
+### Load data
+Get average quarterly growth rates of stores (1487 stores)
+```{r,echo=FALSE,message=FALSE}
+load(file="../glmmlasso_fa/datamat.RData",verbose=T)
+
+
+head(aveGrowthDf,3)
+#remove stores with NA ave growth
+aveGrowthDf=aveGrowthDf[!is.na(aveGrowthDf$aveQtrGrowth),]
+#check 1462 remaining stores do not have NA average monthly growth
+sum(is.na(aveGrowthDf$aveQtrGrowth))
+```
+
+#### Remove outliers
+Histogram indicate outliers. Remove using Hampel's rule
+```{r}
+hist(aveGrowthDf$aveQtrGrowth,100)
+#out=boxcox(lm((aveGrowthDf$aveQtrGrowth +10)~1))
+#range(out$x[out$y > max(out$y)-qchisq(0.95,1)/2])
+trimmedVal=trimByHampel(log10(aveGrowthDf$aveQtrGrowth+2),t=3)
+#trimmed 188 outliers
+length(aveGrowthDf$aveQtrGrowth)-length(trimmedVal)
+hist(trimmedVal,100)
+```
+
+Load store features (1602 stores)
+```{r}
+load(file=paste0(ProjectPath,"/insight/data/dsStore.RData"),verbose=T)  #store level
+head(dsStore,3)
+```
+
+Load data matrix and the test set for random forest
+```{r, echo=FALSE}
+load(file="dsMat.RData",verbose=T)
+dsMat=as.data.frame(merge(aveGrowthDf,dsStore,by.x=0,by.y="storeID",sort=T))
+dsMat$empRate=dsMat$nEmployed/dsMat$population
+
+#zero-impute NA values
+dsMat[is.na(dsMat)]=0
+#check that no NA values remain
+sum(is.na(dsMat))
+head(dsMat,3)
+save(dsMat,file="dsMat.RData")
+```
+
+### Test set for model validation
+Set aside 10% test set for validation
+Save this test set for validating other models
+```{r}
+testID=sample(nrow(dsMat),0.1*nrow(dsMat))
+save(dsMat,testID,file="dsMat.RData")
+```
+
+
+### Random forest
+Poor prediction performance (OOB=0.27)
+Consider adding more features or model average monthly growth instead of fast vs slow monthly sales
+```{r}
+#drop variables that you don't wish to model
+excludeVarID=grep("Row.names|^ave.+Growth$|zip|busType|nEmployed",colnames(dsMat))
+#ensure that response aveMthGrowth is numeric to run randomForest in regression mode
+dsMat$aveQtrGrowth=as.numeric(dsMat$aveQtrGrowth)
+mod_rf=randomForest(x=dsMat[-testID,-excludeVarID],y=log10(2+dsMat$aveQtrGrowth[-testID]),
+                    xtest=dsMat[testID,-excludeVarID],ytest=log10(2+dsMat$aveQtrGrowth[testID]),
+                    importance=T)
+mod_rf
+#get model R^2
+mod_rf$test$rsq[mod_rf$ntree]
+#get model MSE
+mod_rf$test$mse[mod_rf$ntree]
+qqplot(log10(2+dsMat$aveQtrGrowth[testID]),mod_rf$test$predicted)
+
+```
+
+#### Variable importance in random forest model
+```{r varImpPlot, echo=FALSE, out.width=1000, out.height=3000}
+imptVar=as.matrix(importance(mod_rf))
+imptVar=imptVar[,1]
+par(mar=c(1,20,2,0))
+barplot(sort(imptVar),horiz=T,las=1,cex.names=0.7, main="Variable importance")
+```
+
+
+Save RF model
+```{r}
+save(mod_rf,imptVar,file="mod.RData")
+```
+
+## TODO
+1. consider other features (drugs, health indicators)
+2. re-engineer features (e.g. purchasing power rather than income)
+4. consider polynomials(t)
+5. consider lasso logistic regression

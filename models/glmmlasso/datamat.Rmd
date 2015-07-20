@@ -1,0 +1,195 @@
+---
+title: "Prepare data matrix (70 variables) for modeling"
+author: "Yen Low"
+date: "17-Jun-15"
+output: 
+  html_document:
+    self_contained: no
+---
+  
+## Setup
+Set paths and load dependencies  
+```{r,echo=FALSE}
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/glmmlasso",sep=""))
+getwd()
+
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+source(paste(RScriptPath,"/R/preprocess.R",sep=""))
+source(paste(RScriptPath,"/R/localMySQL.R",sep=""))
+source(paste(RScriptPath,"/R/hampel.R",sep=""))
+
+require(RMySQL)
+require(glmmLasso)
+require(lattice)
+```
+
+## Load data
+#### Monthly revenue trends
+Get monthly revenue (18-mth time series for 1487 stores)  
+```{r,echo=FALSE,message=FALSE}
+con = dbConnect(drv, username=username, password=passwd)
+totRev=dbGetQuery(con,"SELECT * FROM testdb.totsales_month order by customer_identifier, yr_month")
+colnames(totRev)=c("yr_month","storeID","totalRevenue")
+dbDisconnect(con)
+head(totRev,3)
+```
+
+Remove 158 stores with short time series (13 < mths)   
+```{r, echo=FALSE}
+#remove 134 stores with short time series (> 12 mths)
+numMonths=aggregate(yr_month~storeID,data=totRev[,c("yr_month","storeID")],function(x) length(unique(x)))
+table(numMonths$yr_month)
+rmStores=as.character(numMonths[numMonths$yr_month<13,"storeID"])
+```
+
+#### Remove outliers
+Histogram indicate outliers. Remove using Hampel's rule (5 std devs) and >150,000 or <-10,000  
+1327 stores remain  
+```{r}
+totRev_mt1yr=totRev[!(totRev$storeID %in% rmStores),]
+summary(totRev_mt1yr$totalRevenue)
+qqnorm(totRev_mt1yr$totalRevenue)
+qqnorm(log10(totRev_mt1yr$totalRevenue))
+
+#check which stores consistently have outlier values
+totRev_mt1yr[hampel(totRev_mt1yr$totalRevenue,t=8),]
+sort(table(totRev_mt1yr$storeID[hampel(totRev_mt1yr$totalRevenue,t=5)]),dec=T)
+sort(table(totRev_mt1yr$storeID[totRev_mt1yr$totalRevenue>(150000)]),dec=T)
+sort(table(totRev_mt1yr$storeID[totRev_mt1yr$totalRevenue<(-10000)]),dec=T)
+
+#view store of interest
+totRev_mt1yr[totRev_mt1yr$storeID=="550332",]
+
+outlierStores=c("059699", "393309")
+maybeOutlierStores=c("090050","157784","193615","393309","087882","678048","504428","060830","503847")
+outlierOccasional=c("652229","685096","550332")
+
+dim(totRev_mt1yr) #23722     3
+#remove ocassional outliers
+totRev_mt1yr=totRev_mt1yr[!(totRev_mt1yr$totalRevenue<(-10000)),]
+totRev_mt1yr=totRev_mt1yr[!(totRev_mt1yr$totalRevenue>150000),]
+dim(totRev_mt1yr) #23711     3
+#remove outlier stores
+totRev_mt1yr=totRev_mt1yr[!(totRev_mt1yr$storeID %in% outlierStores),]
+dim(totRev_mt1yr) #23682     3
+
+summary(totRev_mt1yr$totalRevenue)
+qqnorm(totRev_mt1yr$totalRevenue)
+qqnorm(log10(totRev_mt1yr$totalRevenue))
+qqnorm(sqrt(totRev_mt1yr$totalRevenue+10000))
+#model totalRevenue (without log transformation)
+
+length(unique(totRev_mt1yr$storeID))  #1327 stores
+```
+
+#### Load and preprocess store variables
+Remove columns (sparse, near-constant and highly correlated variables)  
+and rows (>50% NA).  
+Use storePerCapita instead of numCompetitor and competitionDensity (all highly correlated!)  
+1109 stores and  69 variables remain (of 1437 stores x 109 variables)   
+```{r}
+## Load store data (1437 stores x 109 variables)
+load(file=paste0(ProjectPath,"/insight/data/dsStore.RData"),verbose=T)  #store level
+excludeVarID=grep("storeID|zip|city|fip|county|^state$|Type|numCompetitor|competDensity",colnames(dsStore))
+colnames(dsStore)[excludeVarID]
+dsMat=dsStore[dsStore$storeID %in% unique(totRev_mt1yr$storeID),]
+rownames(dsMat)=dsMat$storeID
+dsMat=dsMat[order(dsMat$storeID),-excludeVarID]
+dim(dsMat)   #1194  100
+
+save(dsMat,file=paste0(ProjectPath,"/insight/data/dsMat.RData"))
+
+#ensure matrix is numeric
+tmp=as.matrix(dsMat)
+mode(tmp)="numeric"
+
+#remove constant or highly correlated variables (1437 stores)
+tmp2=rmCol(tmp,maxFracConstant=0.99,minSD=0.001,maxR2=0.9,maxNA=0.3)
+#remove the 1 NA variables and 30 variables
+setdiff(colnames(tmp),colnames(tmp2))
+rownames(tmp2)=rownames(dsMat)
+
+#remove 85 stores with a lot of NAs (1342 stores remained)
+#Median impute the remaining
+#use psych::fa which allows NA values (built-in meidan imputation)
+dsMat_rmColRow=rmRow(tmp2,maxNA=0.5)
+
+#view how many NAs
+emptyStore=setdiff(rownames(tmp2),rownames(dsMat_rmColRow))
+tmp3=tmp2[emptyStore,]   
+
+save(dsMat,dsMat_rmColRow,file=paste0(ProjectPath,"/insight/data/dsMat.RData"))
+```
+
+
+#### Load preprocessed store data
+Skip previous chunk if already preprocessed.  
+```{r}
+#load(file=paste0(ProjectPath,"/insight/data/dsMat.RData"),verbose=T)
+#Use dsMat_rmColRow which has NA and near-constant variables removed
+dim(dsMat_rmColRow)   #1109   69
+head(dsMat_rmColRow,3)
+```
+
+## Make data matrix 
+Long form to accommodate revenue time series  
+Set time order for nlme 
+```{r,echo=FALSE}
+dsMat_rmColRow=as.data.frame(dsMat_rmColRow)
+dsMat_rmColRow$storeID=as.factor(rownames(dsMat_rmColRow))
+datamat=merge(dsMat_rmColRow,totRev_mt1yr,by="storeID",sort=T)
+datamat=datamat[order(datamat$storeID,datamat$yr_month),]
+dim(datamat)  #19789    73
+
+#Change from yr_month to numeric order
+#as.numeric(datamat$yr_month)
+yr_monthOrder=data.frame(yr_month=sort(unique(datamat$yr_month)))
+yr_monthOrder$timeOrder=1:nrow(yr_monthOrder)
+#yr_monthOrder
+datamat=merge(datamat,yr_monthOrder,by="yr_month",sort=T)
+datamat=datamat[order(datamat$storeID,datamat$timeOrder),c(3:ncol(datamat),1:2)]
+datamat[1:3,70:ncol(datamat)]   #view portion
+datamat$storeID=as.character(datamat$storeID)
+```
+
+#### View monthly revenue series of 20 randomly selected stores
+```{r}
+selStore=sample(unique(datamat$storeID),20)
+xyplot(totalRevenue~timeOrder|storeID,data=datamat[datamat$storeID %in% selStore,],col.line="black")
+```
+
+## Partition data into training and test sets
+998 stores, 17804 rows for training  
+111 stores, 1985 rows for testing (10%) - same as those used for validating random forest model
+```{r}
+tstStore=sample(unique(datamat$storeID),round(0.1*length(unique(datamat$storeID))))
+trnMat=datamat[!(datamat$storeID %in% tstStore),] #18621 x 74
+tstMat=datamat[datamat$storeID %in% tstStore,]  #2074 x 74
+
+length(unique(trnMat$storeID))  #998 stores, 17804 rows for training
+length(unique(tstMat$storeID))  #111 stores, 1985 rows for testing (10%)
+```
+
+### Scale variables
+Save column means and std dev from training data for scaling test data later  
+As data is scaled to z-scores, perform zero-imputation (equivalent to mean-imputation)  
+Only trnMat and tstMat are scaled, datamat remains unscaled
+```{r, echo=TRUE}
+#exclude the first 3 binary variables and last 3 categorical variables and totalRevenue response
+columnMean=colMeans(trnMat[,3:70],na.rm=T)
+columnSD=apply(trnMat[,3:70],2,sd,na.rm=T)
+
+#Rescale continuous variables only (leave binary variables unscaled)
+for(i in 3:70){
+  trnMat[,i]=(trnMat[,i]-columnMean[i-3])/columnSD[i-3]
+  tstMat[,i]=(tstMat[,i]-columnMean[i-3])/columnSD[i-3]
+}
+
+#Mean-imputation
+trnMat[is.na(trnMat)]=0
+tstMat[is.na(tstMat)]=0
+
+save(columnMean,columnSD,trnMat,tstMat,tstStore,datamat,file="datamat.RData")
+```

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+<meta name="author" content="Yen Low" />
+
+
+<title>Predict revenue at any timepoint using Random Forest regression</title>
+
+<script src="rf_files/jquery-1.11.0/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="rf_files/bootstrap-3.3.1/css/bootstrap.min.css" rel="stylesheet" />
+<script src="rf_files/bootstrap-3.3.1/js/bootstrap.min.js"></script>
+<script src="rf_files/bootstrap-3.3.1/shim/html5shiv.min.js"></script>
+<script src="rf_files/bootstrap-3.3.1/shim/respond.min.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<link rel="stylesheet"
+      href="rf_files/highlight/default.css"
+      type="text/css" />
+<script src="rf_files/highlight/highlight.js"></script>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs && document.readyState && document.readyState === "complete") {
+   window.setTimeout(function() {
+      hljs.initHighlighting();
+   }, 0);
+}
+</script>
+
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img { 
+  max-width:100%; 
+  height: auto; 
+}
+</style>
+<div class="container-fluid main-container">
+
+
+<div id="header">
+<h1 class="title">Predict revenue at any timepoint using Random Forest regression</h1>
+<h4 class="author"><em>Yen Low</em></h4>
+<h4 class="date"><em>06-Jul-15</em></h4>
+</div>
+
+
+<div id="setup" class="section level3">
+<h3>Setup</h3>
+<p>Set paths and load dependencies</p>
+<pre><code>## [1] &quot;/mnt/hgfs/projects/insight/models/rf_timeseries&quot;</code></pre>
+<pre><code>## Loading required package: randomForest
+## randomForest 4.6-10
+## Type rfNews() to see new features/changes/bug fixes.</code></pre>
+</div>
+<div id="load-data" class="section level3">
+<h3>Load data</h3>
+<p>Use data matrix processed in ../glmmlasso/datamat.Rmd Already scaled to training data and imputed</p>
+<pre><code>## Loading objects:
+##   columnMean
+##   columnSD
+##   trnMat
+##   tstMat
+##   datamat</code></pre>
+</div>
+<div id="random-forest" class="section level3">
+<h3>Random forest</h3>
+<p>Good training r2 (0.9) but terrible test r2 (-0.10 or 0.04)</p>
+<pre class="r"><code>#drop variables that you don&#39;t wish to model
+excludeVarID=grep(&quot;^totalRevenue$|^others$|^yr_month$|^storeID$&quot;,colnames(trnMat))
+#ensure that response aveMthGrowth is numeric to run randomForest in regression mode
+trnMat$totalRevenue=as.numeric(trnMat$totalRevenue)
+tstMat$totalRevenue=as.numeric(tstMat$totalRevenue)
+#qqnorm(sqrt(trnMat$totalRevenue+10000))
+mod_rf=randomForest(x=trnMat[,-excludeVarID],y=trnMat$totalRevenue,
+                    xtest=tstMat[,-excludeVarID],ytest=tstMat$totalRevenue,
+                    importance=T,keep.forest=T)
+mod_rf</code></pre>
+<pre><code>## 
+## Call:
+##  randomForest(x = trnMat[, -excludeVarID], y = trnMat$totalRevenue,      xtest = tstMat[, -excludeVarID], ytest = tstMat$totalRevenue,      importance = T, keep.forest = T) 
+##                Type of random forest: regression
+##                      Number of trees: 500
+## No. of variables tried at each split: 23
+## 
+##           Mean of squared residuals: 13242944
+##                     % Var explained: 90.32
+##                        Test set MSE: 178957000
+##                     % Var explained: -62.81</code></pre>
+<pre class="r"><code>#get test R^2
+mod_rf$test$rsq[mod_rf$ntree]</code></pre>
+<pre><code>## [1] -0.6281145</code></pre>
+<pre class="r"><code>#or
+1-mod_rf$test$mse[mod_rf$ntree]/var(tstMat$totalRevenue)</code></pre>
+<pre><code>## [1] -0.6280232</code></pre>
+<pre class="r"><code>cor(mod_rf$predicted,trnMat$totalRevenue)^2</code></pre>
+<pre><code>## [1] 0.903359</code></pre>
+<pre class="r"><code>cor(mod_rf$test$predicted,tstMat$totalRevenue)^2</code></pre>
+<pre><code>## [1] 0.007310119</code></pre>
+<pre class="r"><code>plot(trnMat$totalRevenue,mod_rf$predicted,cex=0.5,pch=16,
+     xlab=&quot;observed revenue ($)&quot;,ylab=&quot;predicted revenue ($)&quot;)
+abline(0,1)
+points(tstMat$totalRevenue,mod_rf$test$predicted,col=&quot;red&quot;,cex=0.5)</code></pre>
+<p><img src="rf_files/figure-html/unnamed-chunk-3-1.png" title="" alt="" width="672" /></p>
+<div id="variable-importance-in-random-forest-model" class="section level4">
+<h4>Variable importance in random forest model</h4>
+<p><img src="rf_files/figure-html/varImpPlot-1.png" title="" alt="" width="1000" height="3000" /></p>
+<p>Save RF model</p>
+<pre class="r"><code>save(mod_rf,imptVar,file=&quot;mod.RData&quot;)</code></pre>
+</div>
+</div>
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+$(document).ready(function () {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+});
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

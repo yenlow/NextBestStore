@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+<meta name="author" content="Yen Low" />
+
+
+<title>Growth curve analysis with regularized mixed modeling (using latent factors)</title>
+
+<script src="datamat_files/jquery-1.11.0/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="datamat_files/bootstrap-3.3.1/css/bootstrap.min.css" rel="stylesheet" />
+<script src="datamat_files/bootstrap-3.3.1/js/bootstrap.min.js"></script>
+<script src="datamat_files/bootstrap-3.3.1/shim/html5shiv.min.js"></script>
+<script src="datamat_files/bootstrap-3.3.1/shim/respond.min.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<link rel="stylesheet"
+      href="datamat_files/highlight/default.css"
+      type="text/css" />
+<script src="datamat_files/highlight/highlight.js"></script>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs && document.readyState && document.readyState === "complete") {
+   window.setTimeout(function() {
+      hljs.initHighlighting();
+   }, 0);
+}
+</script>
+
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img { 
+  max-width:100%; 
+  height: auto; 
+}
+</style>
+<div class="container-fluid main-container">
+
+
+<div id="header">
+<h1 class="title">Growth curve analysis with regularized mixed modeling (using latent factors)</h1>
+<h4 class="author"><em>Yen Low</em></h4>
+<h4 class="date"><em>05-Jul-15</em></h4>
+</div>
+
+
+<div id="setup" class="section level2">
+<h2>Setup</h2>
+<p>Set paths and load dependencies</p>
+<pre><code>## [1] &quot;/mnt/hgfs/projects/insight/models/glmmlasso_fa&quot;</code></pre>
+<pre><code>## Loading required package: glmmLasso
+## Loading required package: lattice</code></pre>
+</div>
+<div id="load-data" class="section level2">
+<h2>Load data</h2>
+<p>Get monthly revenue (18-mth time series for 1487 stores)</p>
+<pre><code>## Loading objects:
+##   columnMean
+##   columnSD
+##   trnMat
+##   tstMat
+##   tstStore
+##   datamat</code></pre>
+<p>Load store data (1109 stores, 15 latent variables)</p>
+<pre class="r"><code>load(file=&quot;../fa/FA.RData&quot;,verbose=T)</code></pre>
+<pre><code>## Loading objects:
+##   mod_fa
+##   factorScores</code></pre>
+<pre class="r"><code>dim(factorScores)</code></pre>
+<pre><code>## [1] 1109   15</code></pre>
+<pre class="r"><code>head(factorScores,3)</code></pre>
+<pre><code>##         Uninsured      Natal PrematureDeath HealthCost    Commute
+## 000026  0.6832417 -1.2719784      0.4550716 -1.5739693  1.5005293
+## 000417 -0.4679518 -0.2817206     -1.1653584 -1.4264550 -0.8983665
+## 001172  0.6054465  0.6013416      1.8732691 -0.7886697  1.3385797
+##            PrCare Unemployment     Rural     TertCare     BizAct
+## 000026 -0.5205881    -1.278904 1.3944556  0.171047105  0.1078577
+## 000417  0.8002191    -1.209345 1.6013182  0.175787030  2.4621668
+## 001172 -0.2731258    -2.675944 0.6329648 -0.007272168 -0.1730276
+##        MedicalRxStore  Pollution ProfServices  Alcholism   OtherBiz
+## 000026     0.12931864  0.1297102   -1.5060674  1.8236544 -0.5010798
+## 000417     0.02881272  0.3675994   -0.5982667 -0.8356556 -0.3495442
+## 001172    -0.01918474 -0.8208838   -1.1269433 -0.6420406 -0.6835301</code></pre>
+</div>
+<div id="make-feature-matrix" class="section level2">
+<h2>Make feature matrix</h2>
+<p>Set time order for nlme</p>
+<pre><code>## [1] 19789    18</code></pre>
+<pre><code>##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##   -9448    7382   13380   16510   22090  139100</code></pre>
+</div>
+<div id="partition-data-into-training-and-test-sets" class="section level2">
+<h2>Partition data into training and test sets</h2>
+<p>Get test store IDs (extract 133 storeIDs from 10% test set used to validate random forest model).<br />Remove 134 stores with short time series (13 &lt; mths)<br />999 stores, 17840 rows for training<br />125 stores, 2074 rows for testing (10%)</p>
+<pre class="r"><code>#Get test store IDs (extract from test set used to validate random forest model)
+trnMat=datamat[!(datamat$storeID %in% tstStore),] #17808 x 19
+tstMat=datamat[datamat$storeID %in% tstStore,]  #1981 x 19
+
+length(unique(trnMat$storeID))  #998 stores, 17824 rows for training</code></pre>
+<pre><code>## [1] 998</code></pre>
+<pre class="r"><code>length(unique(tstMat$storeID))  #111 stores, 1968 rows for testing (10%)</code></pre>
+<pre><code>## [1] 111</code></pre>
+<pre class="r"><code>summary(trnMat$totalRevenue)</code></pre>
+<pre><code>##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##   -9448    7376   13480   16600   22130  139100</code></pre>
+<pre class="r"><code>summary(tstMat$totalRevenue)</code></pre>
+<pre><code>##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##   -5059    7401   12470   15660   21730   78330</code></pre>
+<pre class="r"><code>save(trnMat,tstMat,tstStore,datamat,file=&quot;datamat.RData&quot;)</code></pre>
+<p>No need to rescale factor scores<br />No missing values in factor scores</p>
+</div>
+
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+$(document).ready(function () {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+});
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,208 @@
+---
+title: "Monthly Sales Growth"
+author: "Yen Low"
+date: "06/11/2015"
+output: 
+  html_document:
+    self_contained: no
+---
+  
+### Setup
+Set paths and load dependencies
+```{r,echo=FALSE}
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/timeseries",sep=""))
+getwd()
+
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+source(paste(RScriptPath,"/R/localMySQL.R",sep=""))
+source(paste(RScriptPath,"/R/hampel.R",sep=""))
+source(paste(RScriptPath,"/R/growth.R",sep=""))
+
+require(RMySQL)
+require(astsa)
+require(TTR)
+#require(plyr)
+```
+
+### Load data
+Get monthly sales
+```{r,echo=FALSE,message=FALSE}
+con = dbConnect(drv, username=username, password=passwd)
+totRev=dbGetQuery(con,"SELECT * FROM testdb.totsales_month")
+dbDisconnect(con)
+```
+
+Check number of stores (1487)
+```{r,echo=TRUE,message=TRUE}
+#1487 stores
+storeIDs=unique(totRev$customer_identifier)
+length(storeIDs)
+```
+
+### Data Maniputation
+Convert to dataframe and time series object
+1487 stores over 19 mths
+```{r,echo=FALSE,message=TRUE}
+tsDf=xtabs(totalRevenue ~ customer_identifier + yr_month, totRev)
+head(tsDf,3)
+
+#Then put into a time series object (as ts object from astsa package)
+tsfunc<-function(x){
+  yr_mth=names(x)
+  yr=substr(min(yr_mth),1,4)
+  mth=substr(min(yr_mth),5,6)
+  ans=ts(x,start=as.integer(c(yr,mth)),freq=12)
+  return(list(ans))
+}
+tsList=apply(tsDf,1,tsfunc)
+#x=tsList[[1]]
+```
+
+View time series
+```{r,echo=FALSE,message=TRUE}
+plot(tsList[[1]][[1]])
+```
+
+
+### Calculate growth rates
+Growth rate = (x(tn) - x(tn-1))x(tn-1)
+Average growth rates are calculated from trimmed means of at least 3 values
+Outliers are trimmed by Hampel's test (>3 SD from median)
+```{r,echo=FALSE,message=TRUE}
+#Monthly growth
+growth_mth=lapply(tsList, function(x) growthrate(x[[1]], n=1))
+#x=growth_mth[[1]]
+aveMthGrowth=sapply(growth_mth,trimmedMean_hampel,RemoveNAs=T,na.rm=T,minlen=3)
+
+#Quarterly growth
+growth_qtr=lapply(tsList, function(x){
+  newts=to.quarterly(as.xts(x[[1]]),indexAt="yearmon")[,4]
+  ans=growthrate(newts[-nrow(newts),], n=1)
+  return(ans)
+})
+aveQtrGrowth=sapply(growth_qtr,trimmedMean_hampel,RemoveNAs=T,na.rm=T,minlen=3)
+# x=growth_qtr[[1]]
+# temp=list()
+# for(i in 1:length(growth_qtr)){
+#   x=growth_qtr[[i]]
+#   temp[[i]]=trimmedMean_hampel(x)
+# }
+
+#Annual growth
+growth_yr=lapply(tsList, function(x){
+  newts=to.yearly(as.xts(x[[1]]),indexAt="yearmon")[,4]
+  ans=growthrate(newts[-nrow(newts),], n=1)
+  return(ans)
+})
+aveYrGrowth=sapply(growth_yr,trimmedMean_hampel,RemoveNAs=T,na.rm=T,minlen=1)
+```
+
+View histograms of growth rates
+#### Monthly growth
+View monthly growth of first store
+```{r, echo=FALSE}
+growth_mth[[1]]
+#sort(aveMthGrowth)
+lim=0.5
+tmp=summary(aveMthGrowth)
+tmp
+hist(aveMthGrowth[abs(aveMthGrowth)<lim],breaks=seq(-lim,lim,by=0.1))
+abline(v=tmp["Median"],lty=2)
+abline(v=tmp["Mean"])
+```
+
+
+#### Quarterly growth
+View quarterly growth of first store
+```{r,echo=FALSE}
+growth_qtr[[1]]
+#sort(aveQtrGrowth)
+lim=1
+tmp=summary(aveQtrGrowth[abs(aveQtrGrowth)<lim],)
+tmp
+hist(aveQtrGrowth[abs(aveQtrGrowth)<lim],breaks=seq(-lim,lim,by=0.1))
+abline(v=tmp["Median"],lty=2)
+abline(v=tmp["Mean"])
+```
+
+
+#### Quarterly growth
+View quarterly growth of first store
+```{r,echo=FALSE}
+growth_yr[[1]]
+#sort(aveYrGrowth)
+tmp=summary(aveYrGrowth[aveYrGrowth>-2 & aveYrGrowth<4],)
+tmp
+hist(aveYrGrowth[aveYrGrowth>-2 & aveYrGrowth<4],breaks=seq(-2,4,by=0.1))
+abline(v=tmp["Median"],lty=2)
+abline(v=tmp["Mean"])
+legend("topright", c("Mean","Median"),lty=c(1,2))
+```
+
+### Check for problematic stores
+Some problemantic stores: 983030 182941, 979649, 086800, 015305
+(not enough values, extreme growth rates, etc)
+```{r,echo=TRUE}
+tsList[["015305"]]
+growth_yr[["015305"]]
+aveYrGrowth["015305"]
+```
+
+### Set thresholds for high growth
+Min 5% average monthly growth, 10% quarterly growth, 25% yearly growth
+```{r,echo=TRUE}
+sum(na.omit(aveMthGrowth>0.05 & is.finite(aveMthGrowth)))   #368
+sum(na.omit(aveQtrGrowth>0.1 & is.finite(aveQtrGrowth)))  #417
+sum(na.omit(aveYrGrowth>0.25 & is.finite(aveYrGrowth)))     #499
+```
+
+### Save growth rates and average growth rates into data frames
+Dataframe of average growth rate
+```{r,echo=TRUE}
+aveGrowthDf=as.data.frame(cbind(aveMthGrowth,aveQtrGrowth,aveYrGrowth))
+head(aveGrowthDf,3)
+```
+
+Indicator dataframe of high average growth rate using the above thresholds
+Min 5% average monthly growth, 10% quarterly growth, 25% yearly growth
+```{r,echo=FALSE}
+highGrowthDf=as.data.frame(matrix(0,nrow=nrow(aveGrowthDf),ncol=ncol(aveGrowthDf)))
+rownames(highGrowthDf)=rownames(aveGrowthDf)
+colnames(highGrowthDf)=c("highMthGrowth","highQtrGrowth","highYrGrowth")
+highGrowthDf[which(aveGrowthDf$aveMthGrowth>0.05),"highMthGrowth"]=1
+highGrowthDf[which(aveGrowthDf$aveQtrGrowth>0.1),"highQtrGrowth"]=1
+highGrowthDf[which(aveGrowthDf$aveYrGrowth>0.25),"highYrGrowth"]=1
+highGrowthDf[!is.finite(as.matrix(aveGrowthDf))]=NA
+head(highGrowthDf,3)
+```
+
+Check for NA values
+```{r,echo=TRUE}
+sum(is.na(highGrowthDf))
+```
+
+Check pairwise concordance among average monthly, quarterly and yearly growth rates
+```{r,echo=FALSE}
+pairIDs=combn(1:3,2)
+for(i in 1:ncol(pairIDs)) print(table(highGrowthDf[,pairIDs[,i]]))
+```
+
+View store with highest average monthly growth
+```{r,echo=TRUE}
+bestStore=names(which.max(aveMthGrowth))
+aveMthGrowth[bestStore]
+growth_mth[[bestStore]]
+tsList[[bestStore]]
+#png("bestQtrGrowth.png")
+plot(growth_mth[[bestStore]], main="Store with highest average monthly growth", ylab="monthly growth ()")
+#dev.off()
+```
+
+Save time series objects and data frames into data/revGrowth.RData
+```{r}
+save(tsList,highGrowthDf,aveGrowthDf,
+     growth_mth,growth_qtr,growth_yr,file=paste0(ProjectPath,"/insight/data/revGrowth.RData"))
+```
+

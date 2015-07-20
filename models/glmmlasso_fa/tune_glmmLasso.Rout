@@ -1,0 +1,129 @@
+
+R version 3.1.0 (2014-04-10) -- "Spring Dance"
+Copyright (C) 2014 The R Foundation for Statistical Computing
+Platform: x86_64-redhat-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> # Run glmmLasso of all variables on AWS
+> # 18-Jun-15 Yen Low
+> 
+> 
+> #RScriptPath="/mnt/hgfs/scripts"
+> #ProjectPath="/mnt/hgfs/projects"
+> RScriptPath="/home/yenlow/scripts"
+> ProjectPath="/home/yenlow/projects"
+> setwd(paste(ProjectPath,"/insight/models/glmmlasso",sep=""))
+> getwd()
+[1] "/home/yenlow/projects/insight/models/glmmlasso"
+> 
+> source(paste(RScriptPath,"/R/utils.R",sep=""))
+> 
+> require(glmmLasso)
+Loading required package: glmmLasso
+> require(lattice)
+Loading required package: lattice
+> require(doParallel)  #only supports multi-core parallelization
+Loading required package: doParallel
+Loading required package: foreach
+Loading required package: iterators
+Loading required package: parallel
+> require(foreach)
+> 
+> options("na.action")
+$na.action
+[1] "na.omit"
+
+> 
+> 
+> #specify number of cores req
+> cl=makeCluster(10) 
+> registerDoParallel(cl)
+> 
+> #Load feature matrix
+> load(file="datamat.RData",verbose=T)
+Loading objects:
+  columnMean
+  columnSD
+  trnMat
+  tstMat
+  datamat
+> 
+> ##### Fit a base model (Intercept model, i.e. One-way ANOVA)
+> #mod_base=glmmPQL(totalRevenue ~ 1, random=~1|storeID,family="gaussian",data=tstMat)
+> #mod_base
+> 
+> #provide some initial guesstimates of model coeffients (overall intercept, 71 fixed variables, 1120 storeID random effects)
+> #Delta.start=c(as.numeric(mod_base$coef$fixed),rep(0,10),as.numeric(t(mod_base$coef$random$storeID)))
+> #Q.start=as.numeric(VarCorr(mod_base)[1,1])  #get fixed intercept variance
+> #start=Delta.start
+> ####################
+> 
+> #### Fit Intercept as outcome  model
+> #Formulate model
+> varString=paste(colnames(trnMat)[1:70],collapse=" + ")
+> formulaString=paste0("totalRevenue ~ timeOrder + ",varString)
+> formulaString
+[1] "totalRevenue ~ timeOrder + retail + medical + others + population + Population.that.is.not.proficient.in.English + Population.living.in.a.rural.area + Uninsured + Uninsured.adults + Uninsured.children + Unemployment + Income.inequality + Median.household.income + competDensity + Premature.death + Poor.or.fair.health + Poor.physical.health.days + Poor.mental.health.days + Low.birthweight + Adult.smoking + Adult.obesity + Food.environment.index + Physical.inactivity + Access.to.exercise.opportunities + Excessive.drinking + Alcohol.impaired.driving.deaths + Sexually.transmitted.infections + Teen.births + Primary.care.physicians + Dentists + Mental.health.providers + Preventable.hospital.stays + Diabetic.screening + Mammography.screening + High.school.graduation + Some.college + Children.in.poverty + Children.in.single.parent.households + Social.associations + Violent.crime + Injury.deaths + Air.pollution...particulate.matter + Drinking.water.violations + Severe.housing.problems + Driving.alone.to.work + Long.commute...driving.alone + Diabetes + HIV.prevalence.rate + Premature.age.adjusted.mortality + Infant.mortality + Child.mortality + Food.insecurity + Limited.access.to.healthy.foods + Motor.vehicle.crash.deaths + Drug.poisoning.deaths + Health.care.costs + Could.not.see.doctor.due.to.cost + Other.primary.care.providers + Children.eligible.for.free.lunch + AnnPayrollK + nBiz + manufacturing + transportwarehousing + Finance_and_Insurance + Professional_Scientific_and_Technical_Services + Management_of_Companies_and_Enterprises + Administrative_and_Support_and_Waste_Management_and_Remediation_Services + Educational_Services + Health_Care_and_Social_Assistance + General_Medical_and_Surgical_Hospitals + nClassifiedBiz"
+> 
+> #select 10% stores for tuning lambda
+> tuneStore=sample(unique(trnMat$storeID),0.05*1120)
+> tuneMat=trnMat[trnMat$storeID %in% tuneStore,]
+> tuneMat=tuneMat[order(tuneMat$storeID,tuneMat$timeOrder),]
+> tuneMat[1:5,70:ncol(tuneMat)]
+     nClassifiedBiz totalRevenue timeOrder yr_month storeID
+260      -0.2645813     13293.52         1   201312  013556
+1724     -0.2645813     22880.61         2   201401  013556
+2411     -0.2645813     16552.84         3   201402  013556
+3665     -0.2645813     33979.32         4   201403  013556
+4880     -0.2645813     20267.20         5   201404  013556
+> dim(tuneMat)
+[1] 943  74
+> 
+> #possible lambda values for tuning model (start with large lambda penalty)
+> lambda=seq(500,0,len=2)
+> 
+> mod_glmmLasso=list()
+> 
+> t0=Sys.time()
+> mod_glmmLasso=foreach(j=1:length(lambda),.packages="glmmLasso") %dopar%{
++ #for(j in 1:length(lambda)){
++   print(paste("Iteration ",j,sep=""))
++   tryObj <- try(glmmLasso(as.formula(formulaString), rnd=list(storeID=~timeOrder),
++                           data=tuneMat, lambda=lambda[j]))
++   if(class(tryObj)!="try-error") tryObj else NULL
++ }
+> Sys.time() - t0
+Time difference of 10.64825 mins
+> 
+> #remember to terminate the cores when done
+> stopCluster(cl)
+> 
+> 
+> #BIC_vec=sapply(mod_glmmLasso,`[`,"BIC")
+> #bestLambda=lambda[which.min(BIC_vec)]
+> 
+> save(mod_glmmLasso,tuneStore, file="glmmLasso.RData")
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> proc.time()
+   user  system elapsed 
+  1.360   0.107 642.102 

@@ -1,0 +1,98 @@
+---
+title: "Predict which store is fast growing using a Random Forest classifier"
+author: "Yen Low"
+date: "06/16/2015"
+output: 
+  html_document:
+    self_contained: no
+---
+  
+### Setup
+Set paths and load dependencies
+```{r,echo=FALSE}
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/rf_fastVsSlow",sep=""))
+getwd()
+
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+
+require(randomForest)
+require(choroplethrZip) 
+```
+
+### Load data
+Get indicator variables identifying stores as fast or slow growing (1487 stores)
+```{r,echo=FALSE,message=FALSE}
+load(file=paste0(ProjectPath,"/insight/data/revGrowth.RData"),verbose=T)  #response: sales growthload
+head(highGrowthDf,3)
+```
+
+Load store features (1437 stores)
+```{r}
+load(file=paste0(ProjectPath,"/insight/data/dsStore.RData"),verbose=T)  #store level
+str(dsStore)
+```
+
+Load data matrix and the test set for random forest
+```{r, echo=FALSE}
+dsMat=as.data.frame(merge(highGrowthDf,dsStore,by.x=0,by.y="storeID",sort=T))
+str(dsMat)
+save(dsMat,file="dsMat.RData")
+#load(file="dsMat.RData",verbose=T)
+```
+
+### Test set for model validation
+Set aside 10% test set for validation
+Save this test set for validating other models
+```{r}
+testID=sample(nrow(dsMat),0.1*nrow(dsMat))
+#ensure no NA or missing values (do zero imputation)
+sum(is.na(dsMat))
+dsMat[is.na(dsMat)]=0
+sum(is.na(dsMat))
+testStores=dsMat$Row.names[testID]
+save(dsMat,testID,file="dsMat.RData")
+save(testStores,file="testStores.RData")
+#load(file="dsMat.RData",verbose=T)
+```
+
+### Random forest
+Acceptable prediction performance (OOB=0.27)
+Consider adding more features or model average monthly growth instead of fast vs slow monthly sales
+```{r}
+#drop variables that you don't wish to model
+excludeVarID=grep("Row.names|high|zip|city|fip|county|^state$|Type$",colnames(dsMat))
+colnames(dsMat)[excludeVarID]
+#ensure that response highMthGrowth is a factor to run randomForest in classification mode
+dsMat$highMthGrowth=as.factor(dsMat$highMthGrowth)
+mod_rf=randomForest(x=dsMat[-testID,-excludeVarID],y=dsMat$highMthGrowth[-testID],
+                    xtest=dsMat[testID,-excludeVarID],ytest=dsMat$highMthGrowth[testID])
+mod_rf
+```
+
+#### Variable importance in random forest model
+```{r varImpPlot, echo=FALSE, out.width=1000, out.height=9000}
+imptVar=as.matrix(importance(mod_rf))
+imptVar=sort(imptVar[,"MeanDecreaseGini"],decreasing=T)
+par(mar=c(2,20,2,0))
+barplot(imptVar[50:1],horiz=T,las=1,log="x",cex.names=0.6, main="Variable importance")
+```
+
+Less important variables (in decreasing importance)
+```{r echo=FALSE}
+as.matrix(imptVar[51:length(imptVar)])
+```
+
+Save RF model
+```{r}
+write.table(as.matrix(imptVar),file="imptVar.txt",col.names=F,quote=F,sep="\t")
+save(mod_rf,imptVar,file="mod.RData")
+```
+
+## TODO
+1. consider other features (drugs)
+2. consider time-varying features (e.g. emp rate)
+3. consider continuous random forest (modeling average monthly growth)
+4. consider polynomials(t)
+5. consider lasso logistic regression

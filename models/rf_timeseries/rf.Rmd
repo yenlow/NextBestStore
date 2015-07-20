@@ -1,0 +1,69 @@
+---
+title: "Predict revenue at any timepoint using Random Forest regression"
+author: "Yen Low"
+date: "06-Jul-15"
+output: 
+  html_document:
+    self_contained: no
+---
+  
+### Setup
+Set paths and load dependencies
+```{r,echo=FALSE}
+RScriptPath="/mnt/hgfs/scripts"
+ProjectPath="/mnt/hgfs/projects"
+setwd(paste(ProjectPath,"/insight/models/rf_timeseries",sep=""))
+getwd()
+
+source(paste(RScriptPath,"/R/utils.R",sep=""))
+
+require(randomForest)
+```
+
+### Load data
+Use data matrix processed in ../glmmlasso/datamat.Rmd
+Already scaled to training data and imputed 
+```{r,echo=FALSE,message=FALSE}
+load(file="../glmmlasso/datamat.RData",verbose=T)
+```
+
+
+### Random forest
+Good training r2 (0.9) but terrible test r2 (-0.10 or 0.04)
+```{r}
+#drop variables that you don't wish to model
+excludeVarID=grep("^totalRevenue$|^others$|^yr_month$|^storeID$",colnames(trnMat))
+#ensure that response aveMthGrowth is numeric to run randomForest in regression mode
+trnMat$totalRevenue=as.numeric(trnMat$totalRevenue)
+tstMat$totalRevenue=as.numeric(tstMat$totalRevenue)
+#qqnorm(sqrt(trnMat$totalRevenue+10000))
+mod_rf=randomForest(x=trnMat[,-excludeVarID],y=trnMat$totalRevenue,
+                    xtest=tstMat[,-excludeVarID],ytest=tstMat$totalRevenue,
+                    importance=T,keep.forest=T)
+mod_rf
+#get test R^2
+mod_rf$test$rsq[mod_rf$ntree]
+#or
+1-mod_rf$test$mse[mod_rf$ntree]/var(tstMat$totalRevenue)
+cor(mod_rf$predicted,trnMat$totalRevenue)^2
+cor(mod_rf$test$predicted,tstMat$totalRevenue)^2
+plot(trnMat$totalRevenue,mod_rf$predicted,cex=0.5,pch=16,
+     xlab="observed revenue ($)",ylab="predicted revenue ($)")
+abline(0,1)
+points(tstMat$totalRevenue,mod_rf$test$predicted,col="red",cex=0.5)
+```
+
+#### Variable importance in random forest model
+```{r varImpPlot, echo=FALSE, out.width=1000, out.height=3000}
+imptVar=as.matrix(importance(mod_rf))
+imptVar=imptVar[,1]
+par(mar=c(1,20,2,0))
+barplot(sort(imptVar),horiz=T,las=1,cex.names=0.7, main="Variable importance")
+```
+
+
+Save RF model
+```{r}
+save(mod_rf,imptVar,file="mod.RData")
+```
+
